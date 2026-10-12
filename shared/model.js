@@ -37,7 +37,7 @@ const Model = (() => {
   const BOOK_FIELDS = Object.freeze(['book_id', 'title', 'author', 'status', 'started', 'finished', 'themes', 'favourite', 'disagreed', 'rating',
     'deleted', 'version', 'updated_at']);
   const CHAPTER_FIELDS = Object.freeze(['chapter_id', 'book_id', 'chapter', 'date', 'question_ids', 'question_1', 'answer_1', 'question_2', 'answer_2',
-    'summary', 'log_id', 'deleted', 'version', 'updated_at']);
+    'summary', 'log_id', 'deleted', 'version', 'updated_at', 'part']);
   const QUESTION_FIELDS = Object.freeze(['question_id', 'text', 'paused', 'version', 'updated_at']);
   /** Weekly comfort challenges (5a): the bank, and the weeks a swap or Done fixed. */
   const CHALLENGE_FIELDS = Object.freeze(['challenge_id', 'category', 'text', 'points', 'paused', 'version', 'updated_at']);

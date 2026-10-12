@@ -64,10 +64,12 @@ async function status(book, action, message) {
 function bookCard(book, day) {
   const chapters = Reading.checkIns(data.chapters, book.book_id);
   const todays = chapters.filter((c) => c.date === day).length;
-  const upTo = chapters.reduce((m, c) => Math.max(m, c.chapter ?? 0), 0);
+  const part = Reading.currentPart(data.chapters, book.book_id);
+  const upTo = Reading.upTo(data.chapters, book.book_id, part);
+  const where = Reading.hasParts(data.chapters, book.book_id) ? `Part ${part} · ${upTo ? `up to Ch ${upTo}` : 'starting'}` : upTo ? `up to Ch ${upTo}` : 'not started';
   return el('section', { class: 'card book' },
     el('div', { class: 'habit-head' }, el('h2', {}, book.title),
-      el('span', { class: 'muted small' }, upTo ? `up to Ch ${upTo}` : 'not started')),
+      el('span', { class: 'muted small' }, where)),
     el('p', { class: 'muted small' }, byLine(book), todays ? ` · ${todays} today` : ''),
     el('div', { class: 'actions start' },
       el('button', { class: 'button primary', type: 'button', onclick: () => checkInSheet(book, day) }, 'Finished a chapter'),
@@ -95,16 +97,19 @@ function finishedBook(book) {
       el('button', { class: 'link', type: 'button', onclick: () => status(book, 'resume', `${book.title}: back on the go.`) }, 'Reading it again')));
 }
 
-/** A book's check-ins, chapter by chapter, folded. @param {Book} book @param {Chapter[]} chapters @param {string} label */
+/** A book's check-ins, chapter by chapter, folded; under a heading per part in a book read in parts (ADR-031). @param {Book} book @param {Chapter[]} chapters @param {string} label */
 function chapterMap(book, chapters, label) {
+  const rows = (/** @type {Chapter[]} */ list) => el('ol', { class: 'map' }, list.map((c) => el('li', { class: 'map-row' },
+    el('div', { class: 'map-head' }, el('span', { class: 'map-no' }, Reading.span(chapters, c)), el('span', { class: 'map-summary' }, c.summary ?? ''),
+      el('button', { class: 'link', type: 'button', 'aria-label': `Change ${Reading.label(chapters, c)}`, onclick: () => editSheet(c) }, 'Change')),
+    el('dl', { class: 'qa' },
+      c.answer_1 ? [el('dt', {}, c.question_1 ?? ''), el('dd', {}, c.answer_1)] : '',
+      c.answer_2 ? [el('dt', {}, c.question_2 ?? ''), el('dd', {}, c.answer_2)] : ''))));
   return folded(`map:${book.book_id}`, 'chapter-map',
     el('summary', {}, label),
-    el('ol', { class: 'map' }, chapters.map((c) => el('li', { class: 'map-row' },
-      el('div', { class: 'map-head' }, el('span', { class: 'map-no' }, Reading.span(chapters, c)), el('span', { class: 'map-summary' }, c.summary ?? ''),
-        el('button', { class: 'link', type: 'button', 'aria-label': `Change ${Reading.span(chapters, c)}`, onclick: () => editSheet(c) }, 'Change')),
-      el('dl', { class: 'qa' },
-        c.answer_1 ? [el('dt', {}, c.question_1 ?? ''), el('dd', {}, c.answer_1)] : '',
-        c.answer_2 ? [el('dt', {}, c.question_2 ?? ''), el('dd', {}, c.answer_2)] : '')))));
+    Reading.hasParts(chapters, book.book_id)
+      ? Reading.byPart(chapters, book.book_id).map((g) => [el('h3', { class: 'check-group' }, `Part ${g.part}`), rows(g.rows)])
+      : rows(chapters));
 }
 
 /** A labelled text box. @param {string} label @param {string|null} value @param {number} max @param {number} [rows] */
@@ -129,7 +134,23 @@ const saving = (/** @type {() => { close: () => void, messages: HTMLElement }} *
 function checkInSheet(book, day) {
   let turn = 0;
   let questions = Reading.questionsFor(data.questions, data.chapters, book.book_id, day, turn);
+  // The part (ADR-031): shown once the book is in parts, or after "Next part"; the chapter follows the part.
+  let parts = Reading.hasParts(data.chapters, book.book_id);
+  const part = /** @type {HTMLInputElement} */ (el('input', { type: 'number', inputmode: 'numeric', min: '1', max: '99', value: String(Reading.currentPart(data.chapters, book.book_id)) }));
   const chapter = /** @type {HTMLInputElement} */ (el('input', { type: 'number', inputmode: 'numeric', min: '1', max: '999', value: String(Reading.nextChapter(data.chapters, book.book_id)) }));
+  const partNo = () => Math.max(1, Math.floor(Number(part.value) || 1));
+  part.addEventListener('change', () => { chapter.value = String(Reading.nextChapter(data.chapters, book.book_id, partNo())); });
+  const where = el('div', {});
+  const drawWhere = () => where.replaceChildren(
+    parts ? el('div', { class: 'row2' }, el('label', { class: 'field' }, 'Part', part), el('label', { class: 'field' }, 'Up to chapter', chapter))
+      : el('label', { class: 'field' }, 'Up to chapter', chapter),
+    el('button', { class: 'link', type: 'button', onclick: () => {
+      part.value = String(partNo() + 1);
+      chapter.value = String(Reading.nextChapter(data.chapters, book.book_id, partNo()));
+      parts = true;
+      drawWhere();
+    } }, 'Next part'));
+  drawWhere();
   const q1 = el('span', { class: 'question' });
   const q2 = el('span', { class: 'question' });
   const a1 = /** @type {HTMLTextAreaElement} */ (el('textarea', { rows: '3', maxlength: '1000' }));
@@ -138,13 +159,13 @@ function checkInSheet(book, day) {
   label();
   const summary = /** @type {HTMLInputElement} */ (el('input', { type: 'text', maxlength: '200', placeholder: 'What happened, in one line' }));
   const body = el('div', { class: 'form' },
-    el('label', { class: 'field' }, 'Up to chapter', chapter),
+    where,
     el('label', { class: 'field' }, q1, a1), el('label', { class: 'field' }, q2, a2),
     el('button', { class: 'link', type: 'button', onclick: () => { turn += 1; questions = Reading.questionsFor(data.questions, data.chapters, book.book_id, day, turn); label(); } }, 'Other questions'),
     el('label', { class: 'field' }, 'One-line summary', summary),
     el('div', { class: 'actions' }, el('button', { class: 'primary', type: 'button', onclick: saving(() => sheet, async () => {
       if (questions.length < 2) return { ok: false, message: 'The question bank needs at least two questions (Questions tab).' };
-      return saveChapter({ action: 'add', book_id: book.book_id, chapter: Number(chapter.value), question_ids: questions.map((q) => q.question_id),
+      return saveChapter({ action: 'add', book_id: book.book_id, ...(parts ? { part: partNo() } : {}), chapter: Number(chapter.value), question_ids: questions.map((q) => q.question_id),
         answers: [a1.value, a2.value], summary: summary.value });
     }, (r) => toast(`${lineFor(['chapter'], { name: rivalName() }, day, 'Chapter done.')}${r.logged ? ' · Reading done' : ''}`)) }, 'Save check-in')));
   const sheet = openSheet(book.title, body);
@@ -152,16 +173,20 @@ function checkInSheet(book, day) {
 
 /** Changes a check-in: the last chapter it covers, the answers or the summary. @param {Chapter} c */
 function editSheet(c) {
+  const parts = Reading.hasParts(data.chapters, c.book_id);
+  const part = /** @type {HTMLInputElement} */ (el('input', { type: 'number', inputmode: 'numeric', min: '1', max: '99', value: String(Reading.partOf(c)) }));
   const chapter = /** @type {HTMLInputElement} */ (el('input', { type: 'number', inputmode: 'numeric', min: '1', max: '999', value: String(c.chapter ?? '') }));
   const a1 = textBox(c.question_1 ?? 'Answer 1', c.answer_1, 1000);
   const a2 = textBox(c.question_2 ?? 'Answer 2', c.answer_2, 1000);
   const summary = /** @type {HTMLInputElement} */ (el('input', { type: 'text', maxlength: '200', value: c.summary ?? '' }));
   const body = el('div', { class: 'form' },
-    el('label', { class: 'field' }, 'Up to chapter', chapter), a1.field, a2.field, el('label', { class: 'field' }, 'One-line summary', summary),
+    parts ? el('div', { class: 'row2' }, el('label', { class: 'field' }, 'Part', part), el('label', { class: 'field' }, 'Up to chapter', chapter))
+      : el('label', { class: 'field' }, 'Up to chapter', chapter),
+    a1.field, a2.field, el('label', { class: 'field' }, 'One-line summary', summary),
     el('div', { class: 'actions' }, el('button', { class: 'primary', type: 'button', onclick: saving(() => sheet,
-      () => saveChapter({ action: 'edit', chapter_id: c.chapter_id, chapter: Number(chapter.value), answers: [a1.box.value, a2.box.value], summary: summary.value }),
+      () => saveChapter({ action: 'edit', chapter_id: c.chapter_id, ...(parts ? { part: Number(part.value) } : {}), chapter: Number(chapter.value), answers: [a1.box.value, a2.box.value], summary: summary.value }),
       () => toast('Saved.')) }, 'Save')));
-  const sheet = openSheet(`${Reading.span(data.chapters, c)} · ${Dates.shortDay(c.date)}`, body);
+  const sheet = openSheet(`${Reading.label(data.chapters, c)} · ${Dates.shortDay(c.date)}`, body);
 }
 
 /** Adds a book, or changes its title and author. @param {Book|null} book */
