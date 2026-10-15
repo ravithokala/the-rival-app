@@ -259,7 +259,7 @@ li:first-child > .book-done { border-top: 0; }
 .map-row { padding: 8px 0; border-top: 1px solid var(--line); }
 .map-head { display: flex; align-items: center; gap: 8px; }
 .map-no { flex: none; font-weight: 700; color: var(--muted); font-variant-numeric: tabular-nums; }
-.map-summary { flex: 1; min-width: 0; font-weight: 600; overflow-wrap: anywhere; }
+.map-summary { flex: 1; min-width: 0; font-weight: 600; overflow-wrap: anywhere; white-space: pre-line; }
 .map-head .link { flex: none; padding: 0 0 0 8px; }
 .qa { margin: 4px 0 0; font-size: 14px; }
 .qa dt { color: var(--muted); margin-top: 4px; }

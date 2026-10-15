@@ -76,13 +76,15 @@ const Reading = (() => {
 
   /**
    * The questions for a book's next check-in: 2 not yet asked in this book (or, once the bank is used up, not
-   * asked in its last check-in), the same all day; `turn` moves on to the next pair.
+   * asked in its last check-in), the same all day; `turn` moves on to the next pair. None when fewer than 2 are live
+   * (all paused in the Questions tab: ADR-032): the check-in is then the chapter and the summary.
    * @param {Question[]} questions @param {Chapter[]} chapters @param {string} bookId @param {string} today @param {number} [turn]
    * @returns {Question[]}
    */
   function questionsFor(questions, chapters, bookId, today, turn = 0) {
     const live = questions.filter((q) => !q.paused && String(q.text ?? '').trim());
-    if (live.length <= PER_CHECK_IN) return live;
+    if (live.length < PER_CHECK_IN) return [];
+    if (live.length === PER_CHECK_IN) return live;
     const done = checkIns(chapters, bookId);
     const asked = new Set(done.flatMap((c) => c.question_ids));
     const lastAsked = new Set(done.length ? done[done.length - 1].question_ids : []);
@@ -96,7 +98,10 @@ const Reading = (() => {
     return [pool[at], pool[(at + step) % pool.length]];
   }
 
-  return { PER_CHECK_IN, partOf, checkIns, hasParts, currentPart, byPart, current, finished, span, label, upTo, nextChapter, questionsFor };
+  /** Whether check-ins ask questions: at least 2 live in the bank. @param {Question[]} questions */
+  const asks = (questions) => questions.filter((q) => !q.paused && String(q.text ?? '').trim()).length >= PER_CHECK_IN;
+
+  return { PER_CHECK_IN, asks, partOf, checkIns, hasParts, currentPart, byPart, current, finished, span, label, upTo, nextChapter, questionsFor };
 })();
 
 export { Reading };

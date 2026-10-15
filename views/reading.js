@@ -4,13 +4,14 @@ import { el } from '../dom.js';
 import { data, saveBook, saveChapter, today } from '../store/store.js';
 import { Reading } from '../shared/reading.js';
 import { Dates } from '../shared/dates.js';
+import { Model } from '../shared/model.js';
 import { openSheet, toast } from './sheet.js';
 import { lineFor } from './rival.js';
 import { rivalName } from './screens.js';
 
 /**
  * Reading (Milestone 5a; docs/PROJECT_BRIEF.md, Reading; ADR-023): the books on the go, each with "Finished a chapter"
- * (two questions from the bank, the answers and a one-line summary; it also counts as today's Reading) and its
+ * (two questions from the bank unless all are paused, the answers and a summary; it also counts as today's Reading) and its
  * chapter map; finishing a book takes a short reflection and a 1–5 rating. Finished books keep their map and
  * reflection; a book put down can be picked up again.
  */
@@ -40,7 +41,7 @@ export function readingScreen(main) {
     ...(reading.length ? reading.map((b) => bookCard(b, day))
       : [el('section', { class: 'card' },
         el('h2', {}, 'No book on the go'),
-        el('p', { class: 'muted small' }, 'Add the book you are reading. After each reading session, two questions and a one-line summary build its chapter map.'),
+        el('p', { class: 'muted small' }, 'Add the book you are reading. After each reading session, a short summary (and two questions, unless they are paused) builds its chapter map.'),
         el('div', { class: 'actions start' }, el('button', { class: 'button primary', type: 'button', onclick: () => bookSheet(null) }, 'Add a book')))]),
     reading.length ? el('div', { class: 'actions start' }, el('button', { class: 'button', type: 'button', onclick: () => bookSheet(null) }, 'Add another book')) : '',
     done.length ? el('section', { class: 'card' },
@@ -130,7 +131,13 @@ const saving = (/** @type {() => { close: () => void, messages: HTMLElement }} *
   after(r);
 };
 
-/** "Finished a chapter": two questions, the answers and a one-line summary. @param {Book} book @param {string} day */
+/** The summary box: a few lines, at most Model.MAX_SUMMARY characters (ADR-032). @param {string|null} value */
+const summaryBox = (value) => /** @type {HTMLTextAreaElement} */ (el('textarea', { rows: '4', maxlength: String(Model.MAX_SUMMARY), placeholder: 'What happened' }, value ?? ''));
+
+/**
+ * "Finished a chapter": two questions, the answers and a summary; just the summary when every question is paused (ADR-032).
+ * @param {Book} book @param {string} day
+ */
 function checkInSheet(book, day) {
   let turn = 0;
   let questions = Reading.questionsFor(data.questions, data.chapters, book.book_id, day, turn);
@@ -157,17 +164,16 @@ function checkInSheet(book, day) {
   const a2 = /** @type {HTMLTextAreaElement} */ (el('textarea', { rows: '3', maxlength: '1000' }));
   const label = () => { q1.textContent = questions[0]?.text ?? ''; q2.textContent = questions[1]?.text ?? ''; };
   label();
-  const summary = /** @type {HTMLInputElement} */ (el('input', { type: 'text', maxlength: '200', placeholder: 'What happened, in one line' }));
+  const summary = summaryBox(null);
+  const asking = questions.length > 0;
   const body = el('div', { class: 'form' },
     where,
-    el('label', { class: 'field' }, q1, a1), el('label', { class: 'field' }, q2, a2),
-    el('button', { class: 'link', type: 'button', onclick: () => { turn += 1; questions = Reading.questionsFor(data.questions, data.chapters, book.book_id, day, turn); label(); } }, 'Other questions'),
-    el('label', { class: 'field' }, 'One-line summary', summary),
-    el('div', { class: 'actions' }, el('button', { class: 'primary', type: 'button', onclick: saving(() => sheet, async () => {
-      if (questions.length < 2) return { ok: false, message: 'The question bank needs at least two questions (Questions tab).' };
-      return saveChapter({ action: 'add', book_id: book.book_id, ...(parts ? { part: partNo() } : {}), chapter: Number(chapter.value), question_ids: questions.map((q) => q.question_id),
-        answers: [a1.value, a2.value], summary: summary.value });
-    }, (r) => toast(`${lineFor(['chapter'], { name: rivalName() }, day, 'Chapter done.')}${r.logged ? ' · Reading done' : ''}`)) }, 'Save check-in')));
+    asking ? [el('label', { class: 'field' }, q1, a1), el('label', { class: 'field' }, q2, a2),
+      el('button', { class: 'link', type: 'button', onclick: () => { turn += 1; questions = Reading.questionsFor(data.questions, data.chapters, book.book_id, day, turn); label(); } }, 'Other questions')] : '',
+    el('label', { class: 'field' }, 'Summary', summary),
+    el('div', { class: 'actions' }, el('button', { class: 'primary', type: 'button', onclick: saving(() => sheet, async () => saveChapter({ action: 'add', book_id: book.book_id,
+      ...(parts ? { part: partNo() } : {}), chapter: Number(chapter.value), question_ids: questions.map((q) => q.question_id),
+      answers: asking ? [a1.value, a2.value] : [], summary: summary.value }), (r) => toast(`${lineFor(['chapter'], { name: rivalName() }, day, 'Chapter done.')}${r.logged ? ' · Reading done' : ''}`)) }, 'Save check-in')));
   const sheet = openSheet(book.title, body);
 }
 
@@ -176,15 +182,18 @@ function editSheet(c) {
   const parts = Reading.hasParts(data.chapters, c.book_id);
   const part = /** @type {HTMLInputElement} */ (el('input', { type: 'number', inputmode: 'numeric', min: '1', max: '99', value: String(Reading.partOf(c)) }));
   const chapter = /** @type {HTMLInputElement} */ (el('input', { type: 'number', inputmode: 'numeric', min: '1', max: '999', value: String(c.chapter ?? '') }));
+  // A check-in saved without questions (ADR-032) has no answers to change.
+  const asked = c.question_ids.length > 0;
   const a1 = textBox(c.question_1 ?? 'Answer 1', c.answer_1, 1000);
   const a2 = textBox(c.question_2 ?? 'Answer 2', c.answer_2, 1000);
-  const summary = /** @type {HTMLInputElement} */ (el('input', { type: 'text', maxlength: '200', value: c.summary ?? '' }));
+  const summary = summaryBox(c.summary);
   const body = el('div', { class: 'form' },
     parts ? el('div', { class: 'row2' }, el('label', { class: 'field' }, 'Part', part), el('label', { class: 'field' }, 'Up to chapter', chapter))
       : el('label', { class: 'field' }, 'Up to chapter', chapter),
-    a1.field, a2.field, el('label', { class: 'field' }, 'One-line summary', summary),
+    asked ? [a1.field, a2.field] : '', el('label', { class: 'field' }, 'Summary', summary),
     el('div', { class: 'actions' }, el('button', { class: 'primary', type: 'button', onclick: saving(() => sheet,
-      () => saveChapter({ action: 'edit', chapter_id: c.chapter_id, ...(parts ? { part: Number(part.value) } : {}), chapter: Number(chapter.value), answers: [a1.box.value, a2.box.value], summary: summary.value }),
+      () => saveChapter({ action: 'edit', chapter_id: c.chapter_id, ...(parts ? { part: Number(part.value) } : {}), chapter: Number(chapter.value),
+        answers: asked ? [a1.box.value, a2.box.value] : [], summary: summary.value }),
       () => toast('Saved.')) }, 'Save')));
   const sheet = openSheet(`${Reading.label(data.chapters, c)} · ${Dates.shortDay(c.date)}`, body);
 }
