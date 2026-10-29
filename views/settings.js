@@ -125,6 +125,29 @@ async function download() {
   toast('Export downloaded.');
 }
 
+/**
+ * The last day never comes before the first (as the Family Calendar's date pairs): its picker opens no earlier
+ * than the first day, and a first day picked after it moves it up. For a new break, the last day also moves
+ * with the first, keeping the break's length, until it is changed by hand.
+ * @param {HTMLInputElement} from
+ * @param {HTMLInputElement} to
+ * @param {boolean} follow
+ */
+function linkBreakDays(from, to, follow) {
+  let start = from.value;
+  let touched = !follow;
+  const sync = () => {
+    if (!touched && start && from.value && to.value) to.value = Dates.addDays(to.value, Dates.daysBetween(start, from.value));
+    start = from.value;
+    to.min = start;
+    if (start && to.value && to.value < start) to.value = start;
+  };
+  from.addEventListener('input', sync);
+  from.addEventListener('change', sync);
+  to.addEventListener('change', () => { touched = true; });
+  sync();
+}
+
 /** The break being edited in Settings, if any (kept across redraws until saved or cancelled). @type {string|null} */
 let editing = null;
 
@@ -144,6 +167,7 @@ function breaksSection(redraw) {
   const from = /** @type {HTMLInputElement} */ (el('input', { type: 'date', value: current ? current.from : day, min: fixedStart ? null : weekStart,
     disabled: fixedStart, 'aria-label': 'First day of the break' }));
   const to = /** @type {HTMLInputElement} */ (el('input', { type: 'date', value: current ? current.to : Dates.addDays(day, 6), 'aria-label': 'Last day of the break' }));
+  linkBreakDays(from, to, !current);
   const note = /** @type {HTMLInputElement} */ (el('input', { type: 'text', maxlength: '100', value: current?.note ?? '', placeholder: 'e.g. Family visit (optional)', 'aria-label': 'Note' }));
   const tracks = data.tracks.filter((t) => !t.paused);
   const keeps = tracks.map((t) => /** @type {HTMLInputElement} */ (el('input', { type: 'checkbox', value: t.track_id,
